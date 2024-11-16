@@ -5,6 +5,27 @@ const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
 });
+
+const cache = {};
+
+const catalogReplicas = ["http://catalog-service-1:3001", "http://catalog-service-2:3002"];
+const orderReplicas = ["http://order-service-1:3003", "http://order-service-2:3004"];
+
+let catalogReplicaIndex = 0;
+let orderReplicaIndex = 0;
+
+function getNextCatalogReplica() {
+  catalogReplicaIndex = (catalogReplicaIndex + 1) % catalogReplicas.length;
+  console.log(catalogReplicas[catalogReplicaIndex]);
+  return catalogReplicas[catalogReplicaIndex];
+}
+
+function getNextOrderReplica() {
+  orderReplicaIndex = (orderReplicaIndex + 1) % orderReplicas.length;
+  console.log(orderReplicas[orderReplicaIndex]);
+  return orderReplicas[orderReplicaIndex];
+}
+
 console.log("***************************************************************\n");
 console.log("***************************************************************\n");
 console.log("=>   Services menu:");
@@ -44,12 +65,45 @@ function handleUserInput(option) {
   }
 }
 
+function getFromCache(key) {
+  const entry = cache[key];
+  if (entry) {
+    return entry.data;
+  }
+  return null;
+}
+
+function setCache(key, data) {
+  cache[key] = { data };
+}
+
+function invalidateCache(key) {
+  if (cache[key]) {
+    delete cache[key];
+    console.log(`Cache invalidated for ${key}`);
+  }
+}
+
 function searchBooks(topic) {
+  const cacheKey = `search:${topic}`;
+  const cachedData = getFromCache(cacheKey);
+
+  if (cachedData) {
+    console.log("Books found (from cache):");
+    console.table(cachedData);
+    showMenu();
+    return;
+  }
+
+  const catalogServer = getNextCatalogReplica();
+
   axios
-    .get(`http://catalog-service:3001/search/${topic}`)
+    .get(`${catalogServer}/search/${topic}`)
     .then((response) => {
+      console.log("cache miss");
       console.log("Books found:");
       console.table(response.data);
+      setCache(cacheKey, response.data);
       showMenu();
     })
     .catch((err) => {
@@ -59,11 +113,24 @@ function searchBooks(topic) {
 }
 
 function getBookInfo(itemNumber) {
+  const cacheKey = `info:${itemNumber}`;
+  const cachedData = getFromCache(cacheKey);
+
+  if (cachedData) {
+    console.log("Book info (from cache):");
+    console.table([cachedData]);
+    showMenu();
+    return;
+  }
+
+  const catalogServer = getNextCatalogReplica();
+
   axios
-    .get(`http://catalog-service:3001/info/${itemNumber}`)
+    .get(`${catalogServer}/info/${itemNumber}`)
     .then((response) => {
       console.log("Book info:");
       console.table([response.data]);
+      setCache(cacheKey, response.data);
       showMenu();
     })
     .catch((err) => {
@@ -73,35 +140,27 @@ function getBookInfo(itemNumber) {
 }
 
 function purchaseBook(itemNumber) {
+  const orderServer = getNextOrderReplica();
+
   axios
-    .get(`http://catalog-service:3001/info/${itemNumber}`)
-    .then((response) => {
-      const bookInfo = response.data;
-      if (bookInfo) {
-        if (bookInfo.quantity > 0) {
-          return axios.post(`http://order-service:3002/purchase/${itemNumber}`);
-        } else {
-          console.log("The item is out of stock.");
-          return Promise.reject({ response: {  data: "The item is out of stock." } });
-        }
-      } else {
-        console.log("Item not found.");
-        return Promise.reject({ response: { status: 400, data: "Item not found." } });
-      }
-    })
+    .post(`${orderServer}/purchase/${itemNumber}`)
     .then((response) => {
       console.log(response.data.message);
+      const cacheKey = `info:${itemNumber}`;
+      invalidateCache(cacheKey);
+
+      const catalogServer = getNextCatalogReplica();
+      axios.get(`${catalogServer}/info/${itemNumber}`).then((response) => {
+        const topic = response.data.topic;
+        const searchCacheKey = `search:${topic}`;
+        invalidateCache(searchCacheKey);
+      });
       showMenu();
     })
     .catch((err) => {
-      if (err.response && err.response.data) {
-        console.log("Error:", err.response.data);
-      } else {
-        console.log("Error:", err.message);
-      }
+      console.log("Error:", err.response ? err.response.data : err.message);
       showMenu();
     });
 }
-
 
 showMenu();

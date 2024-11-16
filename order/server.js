@@ -2,13 +2,12 @@ const express = require("express");
 const axios = require("axios");
 
 const app = express();
-const port = 3002;
+const port = process.env.PORT || 3002;
 
 app.post("/purchase/:item_number", (req, res) => {
   const itemNumber = req.params.item_number;
-
   axios
-    .post(`http://catalog-service:3001/update-quantity/${itemNumber}`)
+    .post(`http://catalog-service-1:3001/update-quantity/${itemNumber}`)
     .then((response) => {
       res.json({
         message: `Purchase request processed for book ${itemNumber}`,
